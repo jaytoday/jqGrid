@@ -1,39 +1,57 @@
-;(function($){
-/*
-**
- * jqGrid extension for cellediting Grid Data
- * Tony Tomov tony@trirand.com
- * http://trirand.com/blog/ 
- * Dual licensed under the MIT and GPL licenses:
- * http://www.opensource.org/licenses/mit-license.php
- * http://www.gnu.org/licenses/gpl.html
-**/ 
+/*jshint eqeqeq:false */
+/*global jQuery, define */
+(function( factory ) {
+	"use strict";
+	if ( typeof define === "function" && define.amd ) {
+		// AMD. Register as an anonymous module.
+		define([
+			"jquery",
+			"./grid.base"
+		], factory );
+	} else {
+		// Browser globals
+		factory( jQuery );
+	}
+}(function( $ ) {
 /**
  * all events and options here are aded anonynous and not in the base grid
  * since the array is to big. Here is the order of execution.
  * From this point we use jQuery isFunction
  * formatCell
  * beforeEditCell,
- * onSelectCell (used only for noneditable cels)
+ * onCellSelect (used only for noneditable cels)
  * afterEditCell,
  * beforeSaveCell, (called before validation of values if any)
  * beforeSubmitCell (if cellsubmit remote (ajax))
+ * onSubmitCell
  * afterSubmitCell(if cellsubmit remote (ajax)),
  * afterSaveCell,
  * errorCell,
+ * validationCell
+ * serializeCellData - new
  * Options
  * cellsubmit (remote,clientArray) (added in grid options)
  * cellurl
+ * ajaxCellOptions
+ * restoreCellonFail
 * */
-$.fn.extend({
-	editCell : function (iRow,iCol, ed){
+"use strict";
+//module begin
+$.jgrid.extend({
+	editCell : function (iRow,iCol, ed, event, excel){
 		return this.each(function (){
-			var $t = this, nm, tmp,cc;
+			var $t = this, nm, tmp,cc, cm,
+			highlight = $(this).jqGrid('getStyleUI',$t.p.styleUI+'.common','highlight', true),
+			
+			hover = !$t.p.ariaBody ? $(this).jqGrid('getStyleUI',$t.p.styleUI+'.common','hover', true) : "",
+			inpclass = $(this).jqGrid('getStyleUI',$t.p.styleUI+".celledit",'inputClass', true),
+			selclass = $(this).jqGrid('getStyleUI',$t.p.styleUI+".celledit",'selectClass', true);
+
 			if (!$t.grid || $t.p.cellEdit !== true) {return;}
 			iCol = parseInt(iCol,10);
 			// select the row that can be used for other methods
 			$t.p.selrow = $t.rows[iRow].id;
-			if (!$t.p.knv) {$($t).GridNav();}
+			if (!$t.p.knv && !$t.p.ariaBody) {$($t).jqGrid("GridNav");}
 			// check to see if we have already edited cell
 			if ($t.p.savedRow.length>0) {
 				// prevent second click on that field and enable selects
@@ -42,90 +60,206 @@ $.fn.extend({
 						return;
 					}
 				}
-				// if so check to see if the content is changed
-				var vl = $("td:eq("+$t.p.savedRow[0].ic+")>#"+$t.p.savedRow[0].id+"_"+$t.p.savedRow[0].name.replace('.',"\\."),$t.rows[$t.p.savedRow[0].id]).val();
-				if ($t.p.savedRow[0].v !=  vl) {
-					// save it
-					$($t).saveCell($t.p.savedRow[0].id,$t.p.savedRow[0].ic)
-				} else {
-					// restore it
-					$($t).restoreCell($t.p.savedRow[0].id,$t.p.savedRow[0].ic);
-				}
+				// save the cell
+				$($t).jqGrid("saveCell",$t.p.savedRow[0].id,$t.p.savedRow[0].ic);
 			} else {
-				window.setTimeout(function () { $("#"+$t.p.knv).attr("tabindex","-1").focus();},0);
+				window.setTimeout(function () { $("#"+$.jgrid.jqID($t.p.knv)).attr("tabindex","-1").focus();},1);
 			}
-			nm = $t.p.colModel[iCol].name;
-			if (nm=='subgrid' || nm=='cb' || nm=='rn') {return;}
-			if ($t.p.colModel[iCol].editable===true && ed===true) {
-				cc = $("td:eq("+iCol+")",$t.rows[iRow]);
-				if(parseInt($t.p.iCol)>=0  && parseInt($t.p.iRow)>=0) {
-					$("td:eq("+$t.p.iCol+")",$t.rows[$t.p.iRow]).removeClass("edit-cell ui-state-highlight");
-					$($t.rows[$t.p.iRow]).removeClass("selected-row ui-state-hover");
-				}
-				$(cc).addClass("edit-cell ui-state-highlight");
-				$($t.rows[iRow]).addClass("selected-row ui-state-hover");
+			cm = $t.p.colModel[iCol];
+			nm = cm.name;
+			if (nm==='subgrid' || nm==='cb' || nm==='rn' || nm==='sc') {return;}
+			try {
+				cc = $($t.rows[iRow].cells[iCol]);
+			} catch(e) {
+				cc = $("td",$t.rows[iRow]).eq( iCol );
+			}
+			if(parseInt($t.p.iCol,10)>=0  && parseInt($t.p.iRow,10)>=0 && $t.p.iRowId !== undefined) {
+				var therow = $($t).jqGrid('getGridRowById', $t.p.iRowId);
+				//$("td:eq("+$t.p.iCol+")",$t.rows[$t.p.iRow]).removeClass("edit-cell " + highlight);
+				$(therow).removeClass("selected-row " + hover).find("td").eq( $t.p.iCol ).removeClass("edit-cell " + highlight);
+			}
+			cc.addClass("edit-cell " + highlight);
+			$($t.rows[iRow]).addClass("selected-row " + hover);
+			if (cm.editable===true && ed===true && !cc.hasClass("not-editable-cell") && (!$.jgrid.isFunction($t.p.isCellEditable) || $t.p.isCellEditable.call($t,nm,iRow,iCol))) {
 				try {
-					tmp =  $.unformat(cc,{colModel:$t.p.colModel[iCol]},iCol);
+					tmp =  $.unformat.call($t,cc,{rowId: $t.rows[iRow].id, colModel:cm},iCol);
 				} catch (_) {
-					tmp = $.jgrid.htmlDecode($(cc).html());
+					tmp = ( cm.edittype && cm.edittype === 'textarea' ) ? cc.text() : cc.html();
 				}
-				var opt = $.extend({}, $t.p.colModel[iCol].editoptions || {} ,{id:iRow+"_"+nm,name:nm});
-				if (!$t.p.colModel[iCol].edittype) {$t.p.colModel[iCol].edittype = "text";}
-				$t.p.savedRow.push({id:iRow,ic:iCol,name:nm,v:tmp});
-				if($.isFunction($t.p.formatCell)) {
-					var tmp2 = $t.p.formatCell($t.rows[iRow].id,nm,tmp,iRow,iCol);
-					if(tmp2) {tmp = tmp2;}
+				if($t.p.autoencode) { tmp = $.jgrid.htmlDecode(tmp); }
+				if (!cm.edittype) {cm.edittype = "text";}
+				$t.p.savedRow.push({id:iRow, ic:iCol, name:nm, v:tmp, rowId: $t.rows[iRow].id });
+				if(tmp === "&nbsp;" || tmp === "&#160;" || (tmp.length===1 && tmp.charCodeAt(0)===160) ) {tmp='';}
+				if($.jgrid.isFunction($t.p.formatCell)) {
+					var tmp2 = $t.p.formatCell.call($t, $t.rows[iRow].id,nm,tmp,iRow,iCol);
+					if(tmp2 !== undefined ) {tmp = tmp2;}
 				}
-				var elc = createEl($t.p.colModel[iCol].edittype,opt,tmp,cc);
-				if ($.isFunction($t.p.beforeEditCell)) {
-					$t.p.beforeEditCell($t.rows[iRow].id,nm,tmp,iRow,iCol);
+				$($t).triggerHandler("jqGridBeforeEditCell", [$t.rows[iRow].id, nm, tmp, iRow, iCol]);
+				if ($.jgrid.isFunction($t.p.beforeEditCell)) {
+					$t.p.beforeEditCell.call($t, $t.rows[iRow].id,nm,tmp,iRow,iCol);
 				}
-				$(cc).html("").append(elc).attr("tabindex","0");
-				window.setTimeout(function () { $(elc).focus();},0);
-				$("input, select, textarea",cc).bind("keydown",function(e) { 
-					if (e.keyCode === 27) {$($t).restoreCell(iRow,iCol);} //ESC
-					if (e.keyCode === 13) {$($t).saveCell(iRow,iCol);}//Enter
-					if (e.keyCode == 9)  {
-						if (e.shiftKey) {$($t).prevCell(iRow,iCol);} //Shift TAb
-						else {$($t).nextCell(iRow,iCol);} //Tab
+				var opt = $.extend({}, cm.editoptions || {} ,{id:iRow+"_"+nm,name:nm,rowId: $t.rows[iRow].id, oper:'edit', module : 'cell'});
+				if (excel) {
+					tmp = event.key;
+				}
+				var elc = $.jgrid.createEl.call($t,cm.edittype,opt,tmp,true,$.extend({},$.jgrid.ajaxOptions,$t.p.ajaxSelectOptions || {}));
+				if( $.inArray(cm.edittype, ['text','textarea','password']) > -1) {
+					$(elc).addClass(inpclass);
+				} else if(cm.edittype === 'select') {
+					$(elc).addClass(selclass);
+				}
+
+				cc.html("").append(elc).attr("tabindex","0");
+				$.jgrid.bindEv.call($t, elc, opt);
+				window.setTimeout(function () { $(elc).focus();},1);
+				$("input, select, textarea",cc).on("keydown",function(e) {
+					var key = e.key;
+					if (e.keyCode === 27) {
+						if($("input.hasDatepicker",cc).length >0) {
+							if( $(".ui-datepicker").is(":hidden") )  { $($t).jqGrid("restoreCell",iRow,iCol); }
+							else { $("input.hasDatepicker",cc).datepicker('hide'); }
+						} else {
+							$($t).jqGrid("restoreCell",iRow,iCol);
+						}
+					} //ESC
+					if (e.keyCode === 13 && e.altKey && this.nodeName === "TEXTAREA") {
+						this.value = this.value + "\r";
+						return true;
+					}
+					if (e.keyCode === 13 && !e.shiftKey) {
+						$($t).jqGrid("saveCell",iRow,iCol);
+						if(iRow < $t.rows.length-1 && excel) {
+							$($t).jqGrid('focusBodyCell', iRow + 1 , iCol);
+						} else {
+							setTimeout(function(){ $($t).jqGrid('focusBodyCell', iRow , iCol);},100);
+						}
+						// Prevent default action
+						return false;
+					} //Enter
+					if (e.keyCode === 9 && !excel)  {
+						if(!$t.grid.hDiv.loading ) {
+							if (e.shiftKey) { //Shift TAb
+								if($t.p.ariaBody) {
+									$($t).jqGrid("saveCell", iRow , iCol);
+									if(iCol >1 ) {
+										$($t).jqGrid('focusBodyCell', iRow , iCol -1);
+									}
+								} else {
+									var succ2 = $($t).jqGrid("prevCell", iRow, iCol, e);
+									if(!succ2 && $t.p.editNextRowCell) {
+										if(iRow-1 > 0 && $t.rows[iRow-1]) {
+											iRow--;
+											$($t).jqGrid("prevCell", iRow, $t.p.colModel.length, e);
+										}
+									}
+								}
+							} else {
+								if($t.p.ariaBody) {
+									$($t).jqGrid("saveCell", iRow , iCol);
+									if(iCol < $t.p.colModel.length -1) {
+										$($t).jqGrid('focusBodyCell', iRow , iCol + 1);
+									}
+								} else {
+									var succ = $($t).jqGrid("nextCell", iRow, iCol, e);
+									if(!succ && $t.p.editNextRowCell) {
+										if($t.rows[iRow+1]) {
+											iRow++;
+											$($t).jqGrid("nextCell", iRow, 0, e);
+										}
+									}
+								} //Tab
+							}
+						} else {
+							return false;
+						}
+					}
+					if(!excel && $t.p.F2key && $t.p.ariaBody && e.key === 'F2') {
+						$($t).jqGrid("saveCell", iRow , iCol);
+						$($t).jqGrid('focusBodyCell', iRow , iCol);
+						$t.p.F2key = false;
+					}
+					if(excel) {
+						if( key === 'ArrowUp') {
+							$($t).jqGrid("saveCell", iRow , iCol);
+							if(iRow >1 ) {
+								$($t).jqGrid('focusBodyCell', iRow - 1 , iCol);
+							}
+						}
+						if( key === 'ArrowDown' ) {
+							$($t).jqGrid("saveCell", iRow , iCol);
+							if(iRow < $t.p.rows.length-1 ) {
+								$($t).jqGrid('focusBodyCell', iRow + 1 , iCol);
+							}
+						}
+						if( key === 'ArrowLeft') {
+							$($t).jqGrid("saveCell", iRow , iCol);
+							if(iCol >1 ) {
+								$($t).jqGrid('focusBodyCell', iRow , iCol -1);
+							}
+						}
+						if( key === 'ArrowRight' ) {
+							$($t).jqGrid("saveCell", iRow , iCol);
+							if(iCol < $t.p.colModel.length -1) {
+								$($t).jqGrid('focusBodyCell', iRow , iCol + 1);
+							}
+						}
+						if (e.keyCode === 9)  {
+							$($t).jqGrid("saveCell", iRow , iCol);
+							if (e.shiftKey) {
+								if(iCol >1 ) {
+									$($t).jqGrid('focusBodyCell', iRow , iCol -1);
+								}
+							} else {
+								if(iCol < $t.p.colModel.length -1) {
+									$($t).jqGrid('focusBodyCell', iRow , iCol + 1);
+								}
+							}
+						}
 					}
 					e.stopPropagation();
 				});
-				if ($.isFunction($t.p.afterEditCell)) {
-					$t.p.afterEditCell($t.rows[iRow].id,nm,tmp,iRow,iCol);
+				$($t).triggerHandler("jqGridAfterEditCell", [$t.rows[iRow].id, nm, tmp, iRow, iCol]);
+				if ($.jgrid.isFunction($t.p.afterEditCell)) {
+					$t.p.afterEditCell.call($t, $t.rows[iRow].id,nm,tmp,iRow,iCol);
 				}
 			} else {
-				if (parseInt($t.p.iCol)>=0  && parseInt($t.p.iRow)>=0) {
-					$("td:eq("+$t.p.iCol+")",$t.rows[$t.p.iRow]).removeClass("edit-cell ui-state-highlight");
-					$($t.rows[$t.p.iRow]).removeClass("selected-row ui-state-hover");
-				}
-				$("td:eq("+iCol+")",$t.rows[iRow]).addClass("edit-cell ui-state-highlight");
-				$($t.rows[iRow]).addClass("selected-row ui-state-hover"); 
-				if ($.isFunction($t.p.onSelectCell)) {
-					tmp = $("td:eq("+iCol+")",$t.rows[iRow]).html().replace(/\&nbsp\;/ig,'');
-					$t.p.onSelectCell($t.rows[iRow].id,nm,tmp,iRow,iCol);
+				tmp = cc.html().replace(/\&#160\;/ig,'');
+				$($t).triggerHandler("jqGridCellSelect", [$t.rows[iRow].id, iCol, tmp, event]);
+				if ($.jgrid.isFunction($t.p.onCellSelect)) {
+					$t.p.onCellSelect.call($t, $t.rows[iRow].id, iCol, tmp, event);
 				}
 			}
-			$t.p.iCol = iCol; $t.p.iRow = iRow;
+			$t.p.iCol = iCol; $t.p.iRow = iRow; $t.p.iRowId = $t.rows[iRow].id;
 		});
 	},
-	saveCell : function (iRow, iCol){
+	saveCell : function (iRow, iCol, over_value){
 		return this.each(function(){
-			var $t= this, fr;
+			var $t= this, cm = $t.p.colModel[iCol], nm = cm.name, 
+				trow = $($t).jqGrid("getGridRowById", $t.rows[iRow].id),
+				cc = $('td', trow).eq( iCol ), tmp;
+			if(over_value !== undefined ) {
+				tmp = $.unformat.call($t, cc, {rowId: $t.rows[iRow].id, colModel:cm}, iCol);
+				$t.p.savedRow.push( { id:iRow, ic:iCol, name:nm, v: tmp, rowId: $t.rows[iRow].id } );
+				$t.p.savedValues = {oldvalue: tmp, newvalue: over_value, indexRow : iRow};
+			}
+			var fr = $t.p.savedRow.length >= 1 ? 0 : null,
+			errors = $.jgrid.getRegional(this, 'errors'),
+			edit =$.jgrid.getRegional(this, 'edit');
 			if (!$t.grid || $t.p.cellEdit !== true) {return;}
-			if ( $t.p.savedRow.length >= 1) {fr = 0;} else {fr=null;} 
-			if(fr != null) {
-				var cc = $("td:eq("+iCol+")",$t.rows[iRow]),v,v2,
-				nm = $t.p.colModel[iCol].name.replace('.',"\\.");
-				switch ($t.p.colModel[iCol].edittype) {
+			if(fr !== null) {
+				var nmjq = $.jgrid.jqID(nm), v, v2,
+				p = $(cc).offset();
+
+				if( over_value === undefined ) {
+				switch (cm.edittype) {
 					case "select":
-						if(!$t.p.colModel[iCol].editoptions.multiple) {
-							v = $("#"+iRow+"_"+nm.replace('.',"\\.")+">option:selected",$t.rows[iRow]).val();
-							v2 = $("#"+iRow+"_"+nm.replace('.',"\\.")+">option:selected",$t.rows[iRow]).text();
+						if(!cm.editoptions.multiple) {
+							v = $("#"+iRow+"_"+nmjq+" option:selected", trow ).val();
+							v2 = $("#"+iRow+"_"+nmjq+" option:selected", trow).text();
 						} else {
-							var sel = $("#"+iRow+"_"+nm.replace('.',"\\."),$t.rows[iRow]), selectedText = [];
+							var sel = $("#"+iRow+"_"+nmjq, trow), selectedText = [];
 							v = $(sel).val();
-							if(v) v.join(","); else v="";
+							if(v) { v.join(",");} else { v=""; }
 							$("option:selected",sel).each(
 								function(i,selected){
 									selectedText[i] = $(selected).text();
@@ -133,259 +267,362 @@ $.fn.extend({
 							);
 							v2 = selectedText.join(",");
 						}
+						if(cm.formatter) { v2 = v; }
 						break;
 					case "checkbox":
 						var cbv  = ["Yes","No"];
-						if($t.p.colModel[iCol].editoptions){
-							cbv = $t.p.colModel[iCol].editoptions.value.split(":");
+						if(cm.editoptions && cm.editoptions.value){
+							cbv = cm.editoptions.value.split(":");
 						}
-						v = $("#"+iRow+"_"+nm.replace('.',"\\."),$t.rows[iRow]).attr("checked") ? cbv[0] : cbv[1];
+						v = $("#"+iRow+"_"+nmjq, trow).is(":checked") ? cbv[0] : cbv[1];
 						v2=v;
 						break;
 					case "password":
 					case "text":
 					case "textarea":
 					case "button" :
-						v = !$t.p.autoencode ? $("#"+iRow+"_"+nm.replace('.',"\\."),$t.rows[iRow]).val() : $.jgrid.htmlEncode($("#"+iRow+"_"+nm.replace('.',"\\."),$t.rows[iRow]).val());
+						v = $("#"+iRow+"_"+nmjq, trow).val();
 						v2=v;
 						break;
+					case 'custom' :
+						try {
+							if(cm.editoptions && $.jgrid.isFunction(cm.editoptions.custom_value)) {
+								v = cm.editoptions.custom_value.call($t, $(".customelement",cc),'get');
+								if (v===undefined) { throw "e2";} else { v2=v; }
+							} else { throw "e1"; }
+						} catch (e) {
+							if (e==="e1") { $.jgrid.info_dialog(errors.errcap, "function 'custom_value' " + edit.msg.nodefined, edit.bClose, {styleUI : $t.p.styleUI }); }
+							else if (e==="e2") { $.jgrid.info_dialog(errors.errcap, "function 'custom_value' " + edit.msg.novalue, edit.bClose, {styleUI : $t.p.styleUI }); }
+							else {$.jgrid.info_dialog(errors.errcap, e.message, edit.bClose, {styleUI : $t.p.styleUI }); }
+						}
+						break;
+				}
+				} else  {
+					if (cm.editable===true && !cc.hasClass("not-editable-cell") && (!$.jgrid.isFunction($t.p.isCellEditable) || $t.p.isCellEditable.call($t,nm,iRow,iCol))) {
+						v = over_value;
+						v2 = v;
+					} else {
+						v = over_value;
+						v2 = v;
+						$t.p.savedRow.splice(0,1);
+						return;
+					}
 				}
 				// The common approach is if nothing changed do not do anything
-				if (v2 != $t.p.savedRow[fr].v){
-					if ($.isFunction($t.p.beforeSaveCell)) {
-						var vv = $t.p.beforeSaveCell($t.rows[iRow].id,nm, v, iRow,iCol);
-						if (vv) {v = vv;}
+				if (v2 !== $t.p.savedRow[fr].v){
+					var vvv = $($t).triggerHandler("jqGridBeforeSaveCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]);
+					if (vvv) {v = vvv; v2=vvv;}
+					if ($.jgrid.isFunction($t.p.beforeSaveCell)) {
+						var vv = $t.p.beforeSaveCell.call($t, $t.p.savedRow[fr].rowId, nm, v, iRow, iCol);
+						if (vv) {v = vv; v2=vv;}
 					}
-					var cv = checkValues(v,iCol,$t);
+					var cv = $.jgrid.checkValues.call($t, v, iCol), nuem = false;
 					if(cv[0] === true) {
-						var addpost = {};
-						if ($.isFunction($t.p.beforeSubmitCell)) {
-							addpost = $t.p.beforeSubmitCell($t.rows[iRow].id,nm, v, iRow,iCol);
+						var addpost = $($t).triggerHandler("jqGridBeforeSubmitCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]) || {};
+						if ($.jgrid.isFunction($t.p.beforeSubmitCell)) {
+							addpost = $t.p.beforeSubmitCell.call($t, $t.p.savedRow[fr].rowId, nm, v, iRow, iCol);
 							if (!addpost) {addpost={};}
 						}
-						if ($t.p.cellsubmit == 'remote') {
+						var retsub = $($t).triggerHandler("jqGridOnSubmitCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]);
+						if(retsub === undefined) {
+							retsub = true;
+						}
+						if($.jgrid.isFunction($t.p.onSubmitCell) ) {
+							retsub = $t.p.onSubmitCell($t.p.savedRow[fr].rowId, nm, v, iRow, iCol);
+							if( retsub === undefined) {
+								retsub = true;
+							} 
+						}
+						if( retsub === false) {
+							return;
+						}
+						if( $("input.hasDatepicker",cc).length >0) { $("input.hasDatepicker",cc).datepicker('hide'); }
+						var postdata = {};
+						if ($t.p.cellsubmit === 'remote') {
 							if ($t.p.cellurl) {
-								var postdata = {};
+								if($t.p.autoencode) { v = $.jgrid.htmlEncode(v); }
+								if(cm.editoptions && cm.editoptions.NullIfEmpty && v === "") {
+									v = 'null';
+									nuem = true;
+								}
 								postdata[nm] = v;
-								postdata["id"] = $t.rows[iRow].id;
+								var opers = $t.p.prmNames,
+								idname = opers.id,
+								oper = opers.oper;
+								
+								postdata[idname] = $.jgrid.stripPref($t.p.idPrefix, $t.p.savedRow[fr].rowId);
+								postdata[oper] = opers.editoper;
 								postdata = $.extend(addpost,postdata);
-								$.ajax({
+								$($t).jqGrid("progressBar", {method:"show", loadtype : $t.p.loadui, htmlcontent: $.jgrid.getRegional($t,'defaults.savetext') });
+								$t.grid.hDiv.loading = true;
+								$.ajax( $.extend( {
 									url: $t.p.cellurl,
-									data :postdata,
+									data :$.jgrid.isFunction($t.p.serializeCellData) ? $t.p.serializeCellData.call($t, postdata, nm) : postdata,
 									type: "POST",
-									complete: function (result, stat) {
-										if (stat == 'success') {
-											if ($.isFunction($t.p.afterSubmitCell)) {
-												var ret = $t.p.afterSubmitCell(result,postdata.id,nm,v,iRow,iCol);
-												if(ret[0] === true) {
-													$(cc).empty();
-													$($t).setCell($t.rows[iRow].id, iCol, v2);
-													$(cc).addClass("dirty-cell");
-													$($t.rows[iRow]).addClass("edited");
-													if ($.isFunction($t.p.afterSaveCell)) {
-														$t.p.afterSaveCell($t.rows[iRow].id,nm, v, iRow,iCol);
-													}
-													$t.p.savedRow.splice(0,1);
-												} else {
-													info_dialog($.jgrid.errors.errcap,ret[1],$.jgrid.edit.bClose);
-													$($t).restoreCell(iRow,iCol);
+									success: function (anydata, stat, result) {
+										$($t).jqGrid("progressBar", {method:"hide", loadtype : $t.p.loadui });
+										$t.grid.hDiv.loading = false;
+										if (stat === 'success') {
+											var ret = $($t).triggerHandler("jqGridAfterSubmitCell", [$t, result, postdata[idname], nm, v, iRow, iCol]) || [true, ''];
+											if (ret[0] === true && $.jgrid.isFunction($t.p.afterSubmitCell)) {
+												ret = $t.p.afterSubmitCell.call($t, result, postdata[idname], nm, v, iRow, iCol);
+											}
+											if(ret[0] === true){
+												if(nuem) {
+													v = "";
 												}
-											} else {
 												$(cc).empty();
-												$($t).setCell($t.rows[iRow].id, iCol, v2);
+												$($t).jqGrid("setCell",$t.p.savedRow[fr].rowId, iCol, v2, false, false, true);
+												cc = $('td', trow).eq( iCol );
 												$(cc).addClass("dirty-cell");
-												$($t.rows[iRow]).addClass("edited");
-												if ($.isFunction($t.p.afterSaveCell)) {
-													$t.p.afterSaveCell($t.rows[iRow].id,nm, v, iRow,iCol);
+												$(trow).addClass("edited");
+												$($t).triggerHandler("jqGridAfterSaveCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]);
+												if ($.jgrid.isFunction($t.p.afterSaveCell)) {
+													$t.p.afterSaveCell.call($t, $t.p.savedRow[fr].rowId, nm, v, iRow,iCol);
 												}
 												$t.p.savedRow.splice(0,1);
+											} else {
+												$($t).triggerHandler("jqGridErrorCell", [result, stat]);
+												if ($.jgrid.isFunction($t.p.errorCell)) {
+													$t.p.errorCell.call($t, result, stat);
+												} else {
+													$.jgrid.info_dialog(errors.errcap, ret[1], edit.bClose, {
+														styleUI : $t.p.styleUI,
+														top:p.top+30, 
+														left:p.left ,
+														onClose : function() {
+															if(!$t.p.restoreCellonFail) {
+																$("#"+iRow+"_"+nmjq, trow).focus();
+															}
+														}
+													});
+												}
+												if( $t.p.restoreCellonFail) {
+													$($t).jqGrid("restoreCell",iRow,iCol);
+												}
 											}
 										}
 									},
-									error:function(res,stat){
-										if ($.isFunction($t.p.errorCell)) {
-											$t.p.errorCell(res,stat);
-											$($t).restoreCell(iRow,iCol);
+									error:function(res,stat,err) {
+										$("#lui_"+$.jgrid.jqID($t.p.id)).hide();
+										$t.grid.hDiv.loading = false;
+										$($t).triggerHandler("jqGridErrorCell", [res, stat, err]);
+										if ($.jgrid.isFunction($t.p.errorCell)) {
+											$t.p.errorCell.call($t, res,stat,err);
 										} else {
-											info_dialog($.jgrid.errors.errcap,res.status+" : "+res.statusText+"<br/>"+stat,$.jgrid.edit.bClose);
-											$($t).restoreCell(iRow,iCol);
+											$.jgrid.info_dialog(errors.errcap, res.status+" : "+res.statusText+"<br/>"+stat, edit.bClose, {
+												styleUI : $t.p.styleUI,
+												top:p.top+30, 
+												left:p.left ,
+												onClose : function() {
+													if(!$t.p.restoreCellonFail) {
+														$("#"+iRow+"_"+nmjq, trow).focus();
+													}
+												}
+											});
+										}
+										if( $t.p.restoreCellonFail) {
+											$($t).jqGrid("restoreCell", iRow, iCol);
 										}
 									}
-								});
+								}, $.jgrid.ajaxOptions, $t.p.ajaxCellOptions || {}));
 							} else {
 								try {
-									info_dialog($.jgrid.errors.errcap,$.jgrid.errors.nourl,$.jgrid.edit.bClose);
-									$($t).restoreCell(iRow,iCol);
+									$.jgrid.info_dialog(errors.errcap,errors.nourl, edit.bClose, {styleUI : $t.p.styleUI });
+									if( $t.p.restoreCellonFail) {
+										$($t).jqGrid("restoreCell", iRow, iCol);
+									}
 								} catch (e) {}
 							}
 						}
-						if ($t.p.cellsubmit == 'clientArray') {
+						if ($t.p.cellsubmit === 'clientArray') {
 							$(cc).empty();
-							$($t).setCell($t.rows[iRow].id,iCol, v2);
+							$($t).jqGrid("setCell", $t.p.savedRow[fr].rowId, iCol, v2, false, false, true);
+							cc = $('td', trow).eq( iCol );
 							$(cc).addClass("dirty-cell");
-							$($t.rows[iRow]).addClass("edited");
-							if ($.isFunction($t.p.afterSaveCell)) {
-								$t.p.afterSaveCell($t.rows[iRow].id,nm, v, iRow,iCol);
+							$(trow).addClass("edited");
+							$($t).triggerHandler("jqGridAfterSaveCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]);
+							if ($.jgrid.isFunction($t.p.afterSaveCell)) {
+								$t.p.afterSaveCell.call($t, $t.p.savedRow[fr].rowId, nm, v, iRow, iCol);
 							}
 							$t.p.savedRow.splice(0,1);
+						} else if($t.p.cellsubmit === 'storage') {
+							postdata = $t.p.savedRow[fr];
+							postdata[nm] = v;
+							postdata[$t.p.keyName] = $.jgrid.stripPref($t.p.idPrefix, $t.p.savedRow[fr].rowId);
+							$($t).jqGrid('updateStorageRecord', postdata)
+							.then(function(e){
+								if(e.type==="complete") {
+									$(cc).empty();
+									$($t).jqGrid("setCell", $t.p.savedRow[fr].rowId, iCol, v2, false, false, true);
+									cc = $('td', trow).eq( iCol );
+									$(cc).addClass("dirty-cell");
+									$(trow).addClass("edited");
+									$($t).triggerHandler("jqGridAfterSaveCell", [$t.p.savedRow[fr].rowId, nm, v, iRow, iCol]);
+									if ($.jgrid.isFunction($t.p.afterSaveCell)) {
+										$t.p.afterSaveCell.call($t, $t.p.savedRow[fr].rowId, nm, v, iRow, iCol);
+									}
+									$t.p.savedRow.splice(0,1);
+									
+								}
+							})
+							.catch(function(e) {
+								$.jgrid.info_dialog("Error",e.target.error.name + " : "+e.target.error.message,'Close');
+							});							
 						}
 					} else {
 						try {
-							window.setTimeout(function(){info_dialog($.jgrid.errors.errcap,v+" "+cv[1],$.jgrid.edit.bClose)},100);
-							$($t).restoreCell(iRow,iCol);
-						} catch (e) {}
+							if( $.jgrid.isFunction($t.p.validationCell) ) {
+								$t.p.validationCell.call($t, $("#"+iRow+"_"+nmjq, trow), cv[1], iRow, iCol);
+							} else {
+								window.setTimeout(function(){
+									$.jgrid.info_dialog(errors.errcap,v+ " " + cv[1], edit.bClose, {
+										styleUI : $t.p.styleUI, 
+										top:p.top+30, 
+										left:p.left ,
+										onClose : function() {
+											if(!$t.p.restoreCellonFail) {
+												$("#"+iRow+"_"+nmjq, trow).focus();
+											}
+										}
+									});
+								},50);
+								if( $t.p.restoreCellonFail) {
+									$($t).jqGrid("restoreCell", iRow, iCol);
+								}
+							}
+						} catch (e) {
+							alert(cv[1]);
+						}
 					}
 				} else {
-					$($t).restoreCell(iRow,iCol);
+					$($t).jqGrid("restoreCell", iRow, iCol);
 				}
 			}
-			if ($.browser.opera) {
-				$("#"+$t.p.knv).attr("tabindex","-1").focus();
-			} else {
-				window.setTimeout(function () { $("#"+$t.p.knv).attr("tabindex","-1").focus();},0);
-			}
+			window.setTimeout(function () { 
+				$("#"+$.jgrid.jqID($t.p.knv)).attr("tabindex","-1").focus();
+				if($t.p.ariaBody) {
+					$($t).jqGrid('focusBodyCell', $t.p.iRow, $t.p.iCol);
+				}
+			},0);
 		});
 	},
 	restoreCell : function(iRow, iCol) {
 		return this.each(function(){
-			var $t= this, fr;
+			var $t= this, fr = $t.p.savedRow.length >= 1 ? 0 : null;
 			if (!$t.grid || $t.p.cellEdit !== true ) {return;}
-			if ( $t.p.savedRow.length >= 1) {fr = 0;} else {fr=null;}
-			if(fr != null) {
-				var cc = $("td:eq("+iCol+")",$t.rows[iRow]);
-				if($.isFunction($.fn['datepicker'])) {
-				try {
-					$.datepicker('hide');
-				} catch (e) {
+			if(fr !== null) {
+				var trow = $($t).jqGrid("getGridRowById", $t.p.savedRow[fr].rowId),
+				cc = $('td', trow).eq( iCol );
+				// datepicker fix
+				if($.jgrid.isFunction($.fn.datepicker)) {
 					try {
-						$.datepicker.hideDatepicker();
+						$("input.hasDatepicker",cc).datepicker('hide');
 					} catch (e) {}
 				}
-				}
 				$(cc).empty().attr("tabindex","-1");
-				$($t).setCell($t.rows[iRow].id, iCol, $t.p.savedRow[fr].v);
+				$($t).jqGrid("setCell", $t.p.savedRow[0].rowId, iCol, $t.p.savedRow[fr].v, false, false, true);
+				$($t).triggerHandler("jqGridAfterRestoreCell", [$t.p.savedRow[fr].rowId, $t.p.savedRow[fr].v, iRow, iCol]);
+				if ($.jgrid.isFunction($t.p.afterRestoreCell)) {
+					$t.p.afterRestoreCell.call($t, $t.p.savedRow[fr].rowId, $t.p.savedRow[fr].v, iRow, iCol);
+				}				
 				$t.p.savedRow.splice(0,1);
-				
 			}
-			window.setTimeout(function () { $("#"+$t.p.knv).attr("tabindex","-1").focus();},0);
+			window.setTimeout(function () { 
+				$("#"+$t.p.knv).attr("tabindex","-1").focus();
+				if($t.p.ariaBody) {
+					$($t).jqGrid('focusBodyCell', $t.p.iRow, $t.p.iCol);
+				}
+			},0);
 		});
 	},
-	nextCell : function (iRow,iCol) {
-		return this.each(function (){
-			var $t = this, nCol=false;
+	nextCell : function (iRow, iCol, event) {
+		var ret;
+		this.each(function (){
+			var $t = this, nCol=false, i;
 			if (!$t.grid || $t.p.cellEdit !== true) {return;}
 			// try to find next editable cell
-			for (var i=iCol+1; i<$t.p.colModel.length; i++) {
-				if ( $t.p.colModel[i].editable ===true) {
+			for (i=iCol+1; i<$t.p.colModel.length; i++) {
+				if ( $t.p.colModel[i].editable ===true && (!$.jgrid.isFunction($t.p.isCellEditable) || $t.p.isCellEditable.call($t, $t.p.colModel[i].name,iRow,i))) {
 					nCol = i; break;
 				}
 			}
 			if(nCol !== false) {
-				$($t).editCell(iRow,nCol,true);
+				ret = true;
+				$($t).jqGrid("editCell", iRow, nCol, true, event);
 			} else {
+				ret = false;
 				if ($t.p.savedRow.length >0) {
-					$($t).saveCell(iRow,iCol);
+					$($t).jqGrid("saveCell",iRow,iCol);
 				}
 			}
 		});
+		return ret;
 	},
-	prevCell : function (iRow,iCol) {
-		return this.each(function (){
-			var $t = this, nCol=false;
-			if (!$t.grid || $t.p.cellEdit !== true) {return;}
+	prevCell : function (iRow, iCol, event) {
+		var ret;
+		this.each(function (){
+			var $t = this, nCol=false, i;
+			if (!$t.grid || $t.p.cellEdit !== true) {return false;}
 			// try to find next editable cell
-			for (var i=iCol-1; i>=0; i--) {
-				if ( $t.p.colModel[i].editable ===true) {
-					nCol = i; break;
+			for (i=iCol-1; i>=0; i--) {
+				if ( $t.p.colModel[i].editable ===true && (!$.jgrid.isFunction($t.p.isCellEditable) || $t.p.isCellEditable.call($t, $t.p.colModel[i].name, iRow,i))) {
+					nCol = i; 
+					break;
 				}
 			}
 			if(nCol !== false) {
-				$($t).editCell(iRow,nCol,true);
+				ret = true;
+				$($t).jqGrid("editCell", iRow, nCol, true, event);
 			} else {
+				ret = false;
 				if ($t.p.savedRow.length >0) {
-					$($t).saveCell(iRow,iCol);
+					$($t).jqGrid("saveCell",iRow,iCol);
 				}
 			}
 		});
+		return ret;
 	},
 	GridNav : function() {
 		return this.each(function () {
 			var  $t = this;
 			if (!$t.grid || $t.p.cellEdit !== true ) {return;}
 			// trick to process keydown on non input elements
-			$t.p.knv = $("table:first",$t.grid.bDiv).attr("id") + "_kn";
-			var selection = $("<span style='width:0px;height:0px;background-color:black;' tabindex='0'><span tabindex='-1' style='width:0px;height:0px;background-color:grey' id='"+$t.p.knv+"'></span></span>"),
-			i;
-			$(selection).insertBefore($t.grid.cDiv);
-			$("#"+$t.p.knv).focus();
-			$("#"+$t.p.knv).keydown(function (e){
-				switch (e.keyCode) {
-					case 38:
-						if ($t.p.iRow-1 >=0 ) {
-							scrollGrid($t.p.iRow-1,$t.p.iCol,'vu');
-							$($t).editCell($t.p.iRow-1,$t.p.iCol,false);
-						}
-					break;
-					case 40 :
-						if ($t.p.iRow+1 <=  $t.rows.length-1) {
-							scrollGrid($t.p.iRow+1,$t.p.iCol,'vd');
-							$($t).editCell($t.p.iRow+1,$t.p.iCol,false);
-						}
-					break;
-					case 37 :
-						if ($t.p.iCol -1 >=  0) {
-							i = findNextVisible($t.p.iCol-1,'lft');
-							scrollGrid($t.p.iRow, i,'h');
-							$($t).editCell($t.p.iRow, i,false);
-						}
-					break;
-					case 39 :
-						if ($t.p.iCol +1 <=  $t.p.colModel.length-1) {
-							i = findNextVisible($t.p.iCol+1,'rgt');
-							scrollGrid($t.p.iRow,i,'h');
-							$($t).editCell($t.p.iRow,i,false);
-						}
-					break;
-					case 13:
-						if (parseInt($t.p.iCol,10)>=0 && parseInt($t.p.iRow,10)>=0) {
-							$($t).editCell($t.p.iRow,$t.p.iCol,true);
-						}
-					break;
-				}
-				return false;
-			});
+			$t.p.knv = $t.p.id + "_kn";
+			var selection = $("<div style='position:fixed;top:0px;width:1px;height:1px;' tabindex='0'><div tabindex='-1' style='width:1px;height:1px;' id='"+$t.p.knv+"'></div></div>"),
+			i, kdir;
 			function scrollGrid(iR, iC, tp){
-				if (tp.substr(0,1)=='v') {
+				if (tp.substr(0,1)==='v') {
 					var ch = $($t.grid.bDiv)[0].clientHeight,
 					st = $($t.grid.bDiv)[0].scrollTop,
 					nROT = $t.rows[iR].offsetTop+$t.rows[iR].clientHeight,
 					pROT = $t.rows[iR].offsetTop;
-					if(tp == 'vd') {
+					if(tp === 'vd') {
 						if(nROT >= ch) {
 							$($t.grid.bDiv)[0].scrollTop = $($t.grid.bDiv)[0].scrollTop + $t.rows[iR].clientHeight;
 						}
 					}
-					if(tp == 'vu'){					
-						if (pROT < st) {
+					if(tp === 'vu'){
+						if (pROT < st ) {
 							$($t.grid.bDiv)[0].scrollTop = $($t.grid.bDiv)[0].scrollTop - $t.rows[iR].clientHeight;
 						}
 					}
 				}
-				if(tp=='h') {
+				if(tp==='h') {
 					var cw = $($t.grid.bDiv)[0].clientWidth,
 					sl = $($t.grid.bDiv)[0].scrollLeft,
 					nCOL = $t.rows[iR].cells[iC].offsetLeft+$t.rows[iR].cells[iC].clientWidth,
 					pCOL = $t.rows[iR].cells[iC].offsetLeft;
-					if(nCOL >= cw+parseInt(sl)) {
+					if(nCOL >= cw+parseInt(sl,10)) {
 						$($t.grid.bDiv)[0].scrollLeft = $($t.grid.bDiv)[0].scrollLeft + $t.rows[iR].cells[iC].clientWidth;
 					} else if (pCOL < sl) {
 						$($t.grid.bDiv)[0].scrollLeft = $($t.grid.bDiv)[0].scrollLeft - $t.rows[iR].cells[iC].clientWidth;
 					}
 				}
-			};
+			}
 			function findNextVisible(iC,act){
 				var ind, i;
-				if(act == 'lft') {
+				if(act === 'lft') {
 					ind = iC+1;
 					for (i=iC;i>=0;i--){
 						if ($t.p.colModel[i].hidden !== true) {
@@ -394,7 +631,7 @@ $.fn.extend({
 						}
 					}
 				}
-				if(act == 'rgt') {
+				if(act === 'rgt') {
 					ind = iC-1;
 					for (i=iC; i<$t.p.colModel.length;i++){
 						if ($t.p.colModel[i].hidden !== true) {
@@ -404,7 +641,54 @@ $.fn.extend({
 					}
 				}
 				return ind;
-			};
+			}
+
+			$(selection).insertBefore($t.grid.cDiv);
+			$("#"+$t.p.knv)
+			.focus()
+			.keydown(function (e){
+				kdir = e.keyCode;
+				if($t.p.direction === "rtl") {
+					if(kdir===37) { kdir = 39;}
+					else if (kdir===39) { kdir = 37; }
+				}
+				switch (kdir) {
+					case 38:
+						if ($t.p.iRow-1 >0 ) {
+							scrollGrid($t.p.iRow-1,$t.p.iCol,'vu');
+							$($t).jqGrid("editCell",$t.p.iRow-1,$t.p.iCol,false,e);
+						}
+					break;
+					case 40 :
+						if ($t.p.iRow+1 <=  $t.rows.length-1) {
+							scrollGrid($t.p.iRow+1,$t.p.iCol,'vd');
+							$($t).jqGrid("editCell",$t.p.iRow+1,$t.p.iCol,false,e);
+						}
+					break;
+					case 37 :
+						if ($t.p.iCol -1 >=  0) {
+							i = findNextVisible($t.p.iCol-1,'lft');
+							scrollGrid($t.p.iRow, i,'h');
+							$($t).jqGrid("editCell",$t.p.iRow, i,false,e);
+						}
+					break;
+					case 39 :
+						if ($t.p.iCol +1 <=  $t.p.colModel.length-1) {
+							i = findNextVisible($t.p.iCol+1,'rgt');
+							scrollGrid($t.p.iRow,i,'h');
+							$($t).jqGrid("editCell",$t.p.iRow,i,false,e);
+						}
+					break;
+					case 13:
+						if (parseInt($t.p.iCol,10)>=0 && parseInt($t.p.iRow,10)>=0) {
+							$($t).jqGrid("editCell",$t.p.iRow,$t.p.iCol,true,e);
+						}
+					break;
+					default :
+						return true;
+				}
+				return false;
+			});
 		});
 	},
 	getChangedCells : function (mthd) {
@@ -418,17 +702,25 @@ $.fn.extend({
 				if ($(this).hasClass("edited")) {
 					$('td',this).each( function(i) {
 						nm = $t.p.colModel[i].name;
-						if ( nm !== 'cb' && nm !== 'subgrid') {
-							if (mthd=='dirty') {
+						if ( nm !== 'cb' && nm !== 'subgrid' && nm !=='sc') {
+							if (mthd==='dirty') {
 								if ($(this).hasClass('dirty-cell')) {
-									res[nm] = $.jgrid.htmlDecode($(this).html());
+									try {
+										res[nm] = $.unformat.call($t,this,{rowId:$t.rows[j].id, colModel:$t.p.colModel[i]},i);
+									} catch (e){
+										res[nm] = $.jgrid.htmlDecode($(this).html());
+									}
 								}
 							} else {
-								res[nm] = $.jgrid.htmlDecode($(this).html());
+								try {
+									res[nm] = $.unformat.call($t,this,{rowId:$t.rows[j].id,colModel:$t.p.colModel[i]},i);
+								} catch (e) {
+									res[nm] = $.jgrid.htmlDecode($(this).html());
+								}
 							}
 						}
 					});
-					res["id"] = this.id;
+					res.id = this.id;
 					ret.push(res);
 				}
 			});
@@ -437,4 +729,5 @@ $.fn.extend({
 	}
 /// end  cell editing
 });
-})(jQuery);
+//module end
+}));

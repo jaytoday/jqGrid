@@ -1,26 +1,72 @@
-;(function($){
 /**
  * jqGrid Portuguese Translation
-* Tradução da jqGrid em Portugues por Frederico Carvalho, http://www.eyeviewdesign.pt
+ * TraduÃ§Ã£ da jqGrid em Portugues por Frederico Carvalho, http://www.eyeviewdesign.pt
  * Dual licensed under the MIT and GPL licenses:
  * http://www.opensource.org/licenses/mit-license.php
  * http://www.gnu.org/licenses/gpl.html
 **/
-$.jgrid = {
+/*global jQuery, define */
+(function( factory ) {
+	"use strict";
+	if ( typeof define === "function" && define.amd ) {
+		// AMD. Register as an anonymous module.
+		define([
+			"jquery",
+			"../grid.base"
+		], factory );
+	} else {
+		// Browser globals
+		factory( jQuery );
+	}
+}(function( $ ) {
+
+$.jgrid = $.jgrid || {};
+if(!$.jgrid.hasOwnProperty("regional")) {
+	$.jgrid.regional = [];
+}
+$.jgrid.regional["pt"] = {
 	defaults : {
 		recordtext: "View {0} - {1} of {2}",
 	    emptyrecords: "No records to view",
 		loadtext: "A carregar...",
-		pgtext : "Page {0} of {1}"
+		pgtext : "PÃ¡gina {0} de {1}",
+		savetext: "Saving...",
+		pgfirst : "First Page",
+		pglast : "Last Page",
+		pgnext : "Next Page",
+		pgprev : "Previous Page",
+		pgrecs : "Records per Page",
+		showhide: "Toggle Expand Collapse Grid",
+		// mobile
+		pagerCaption : "Grid::Page Settings",
+		pageText : "Page:",
+		recordPage : "Records per Page",
+		nomorerecs : "No more records...",
+		scrollPullup: "Pull up to load more...",
+		scrollPulldown : "Pull down to refresh...",
+		scrollRefresh : "Release to refresh...",
+		valT : "checked",
+		valF : "unchecked",
+		selectLine : "Select row",
+		selectAllLines : "Select all rows"
 	},
 	search : {
 	    caption: "Busca...",
 	    Find: "Procurar",
 	    Reset: "Limpar",
-	    odata : ['equal', 'not equal', 'less', 'less or equal','greater','greater or equal', 'begins with','does not begin with','is in','is not in','ends with','does not end with','contains','does not contain'],
-	    groupOps: [	{ op: "AND", text: "all" },	{ op: "OR",  text: "any" }	],
-		matchText: " match",
-		rulesText: " rules"
+	    odata: [{ oper:'eq', text:'igual'},{ oper:'ne', text:'desigual'},{oper:'lt', text:'menor'},{ oper:'le', text:'menor ou igual'},{ oper:'gt',text:'maior'},{ oper:'ge', text:'maior ou igual'},{ oper:'bw', text:'comecacom'},{ oper:'bn', text:'nao comeca com'},{ oper:'in', text:'estadentro'},{ oper:'ni', text:'nao esta dentro'},{ oper:'ew', text:'finalizacom'},{ oper:'en', text:'nao finaliza com'},{ oper:'cn', text:'contem'},{oper:'nc', text:'nao contem'}],
+	    groupOps: [ { op: "AND", text: "tudo" }, { op: "OR", text:"qualquer" } ],
+		operandTitle : "Click to select search operation.",
+		resetTitle : "Reset Search Value",
+		addsubgrup : "Add subgroup",
+		addrule : "Add rule",
+		delgroup : "Delete group",
+		delrule : "Delete rule",
+		Close : "Close",
+		Operand : "Operand : ",
+		Operation : "Oper : ",
+		filterFor : "filter for"
+
 	},
 	edit : {
 	    addCaption: "Adicionar Registo",
@@ -28,18 +74,23 @@ $.jgrid = {
 	    bSubmit: "Submeter",
 	    bCancel: "Cancelar",
 		bClose: "Fechar",
-		saveData: "Data has been changed! Save changes?",
-		bYes : "Yes",
-		bNo : "No",
-		bExit : "Cancel",
+		saveData: "Dados foram alterados. Guardar?",
+		bYes : "Sim",
+		bNo : "Nao",
+		bExit : "Cancelar",
 	    msg: {
-	        required:"Campo obrigatório",
+	        required:"Campo obrigatÃ³rio",
 	        number:"Por favor, introduza um numero",
 	        minValue:"O valor deve ser maior ou igual que",
 	        maxValue:"O valor deve ser menor ou igual a",
-	        email: "Não é um endereço de email válido",
+	        email: "NÃ£o Ã© um email vÃ¡lid",
 	        integer: "Por favor, introduza um numero inteiro",
-			url: "is not a valid URL. Prefix required ('http://' or 'https://')"
+			date: "Introduza una fecha correcta ",
+			url: "nao e um URL valido. Requerido prefixo ('http://' or 'https://')",
+			nodefined : " nao esta definido!",
+			novalue : " valor requerido!",
+			customarray : "Funcao customizada deve entrar!",
+			customfcheck : "Funcao customizada deve estar presente em caso deconfirmar customizacao!"
 		}
 	},
 	view : {
@@ -66,7 +117,12 @@ $.jgrid = {
 	    alertcap: "Aviso",
 	    alerttext: "Por favor, seleccione um registo",
 		viewtext: "",
-		viewtitle: "View selected row"
+		viewtitle: "Ver coluna selecionada",
+		savetext: "",
+		savetitle: "Save row",
+		canceltext: "",
+		canceltitle : "Cancel row editing",
+		selectcaption : "Actions..."
 	},
 	col : {
 	    caption: "Mostrar/Ocultar Colunas",
@@ -75,8 +131,8 @@ $.jgrid = {
 	},
 	errors : {
 		errcap : "Erro",
-		nourl : "Não especificou um url",
-		norecords: "Não existem dados para processar",
+		nourl : "NÃ£o especificou um url",
+		norecords: "NÃ£o existem dados para processar",
 	    model : "Tamanho do colNames <> colModel!"
 	},
 	formatter : {
@@ -86,16 +142,17 @@ $.jgrid = {
 		date : {
 			dayNames:   [
 				"Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab",
-				"Domingo", "Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado"
+				"Domingo", "Segunda-Feira", "TerÃ§a-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "SÃ¡bado"
 			],
 			monthNames: [
 				"Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez",
-				"Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+				"Janeiro", "Fevereiro", "Marï¿½o", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
 			],
 			AmPm : ["am","pm","AM","PM"],
-			S: function (j) {return j < 11 || j > 13 ? ['º', 'º', 'º', 'º'][Math.min((j - 1) % 10, 3)] : 'º'},
+			S: function (j) {return j < 11 || j > 13 ? ['ï¿½', 'ï¿½', 'ï¿½', 'ï¿½'][Math.min((j - 1) % 10, 3)] : 'ï¿½'},
 			srcformat: 'Y-m-d',
 			newformat: 'd/m/Y',
+			parseRe : /[#%\\\/:_;.,\t\s-]/,
 			masks : {
 	            ISO8601Long:"Y-m-d H:i:s",
 	            ISO8601Short:"Y-m-d",
@@ -109,13 +166,27 @@ $.jgrid = {
 	            UniversalSortableDateTime: "Y-m-d H:i:sO",
 	            YearMonth: "F, Y"
 	        },
-	        reformatAfterEdit : false
+	        reformatAfterEdit : false,
+			userLocalTime : false
 		},
 		baseLinkUrl: '',
 		showAction: '',
 	    target: '',
 	    checkbox : {disabled:true},
 		idName : 'id'
+	},
+	colmenu : {
+		sortasc : "Sort Ascending",
+		sortdesc : "Sort Descending",
+		columns : "Columns",
+		filter : "Filter",
+		grouping : "Group By",
+		ungrouping : "Ungroup",
+		searchTitle : "Get items with value that:",
+		freeze : "Freeze",
+		unfreeze : "Unfreeze",
+		reorder : "Move to reorder",
+		hovermenu: "Click for column quick actions"
 	}
 };
-})(jQuery);
+}));
